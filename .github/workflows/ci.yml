@@ -138,7 +138,7 @@ jobs:
                           exec(code, ns)
           chars = ns.get("CHARACTERS", {})
           assert chars, "CHARACTERS dict is empty"
-          required_keys = {"emoji", "color", "accent", "text_color", "sounds"}
+          required_keys = {"emoji", "accent", "glow", "tag", "sounds"}
           for name, data in chars.items():
               missing = required_keys - set(data.keys())
               assert not missing, f"{name} missing keys: {missing}"
