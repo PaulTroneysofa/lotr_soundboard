@@ -64,12 +64,15 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
+          # libasound2 → libasound2t64 on Ubuntu 24.04
           sudo apt-get install -y --no-install-recommends \
             espeak-ng \
             libqt5widgets5 libqt5gui5 libqt5core5a libqt5network5 \
-            libasound2 libpulse0 \
+            libpulse0 \
             libsdl2-2.0-0 libsdl2-mixer-2.0-0 \
-            xvfb fonts-dejavu-core
+            xvfb fonts-dejavu-core || true
+          sudo apt-get install -y libasound2t64 2>/dev/null \
+            || sudo apt-get install -y libasound2 2>/dev/null || true
 
       - name: Install Python deps
         run: pip install -r requirements.txt

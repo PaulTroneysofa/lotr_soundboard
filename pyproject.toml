@@ -9,6 +9,12 @@ ignore = ["E501"]  # line length handled separately
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-warn_unused_ignores = true
+warn_unused_ignores = false
 warn_return_any = false
-disallow_untyped_defs = false  # PyQt5 stubs incomplete
+disallow_untyped_defs = false
+
+# PyQt5 stubs don't expose Qt enum members (AlignCenter, Key_Escape, etc.)
+# as attributes — disable attr-defined only for the UI file
+[[tool.mypy.overrides]]
+module = "soundboard"
+disable_error_code = ["attr-defined"]
