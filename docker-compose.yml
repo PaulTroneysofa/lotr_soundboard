@@ -1,0 +1,67 @@
+services:
+
+  # ── Application principale (avec display X11 hôte) ─────────────────────────
+  soundboard:
+    build:
+      context: .
+      target: runtime
+    image: lotr-soundboard:latest
+    container_name: lotr-soundboard
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - SDL_AUDIODRIVER=pulse,alsa,dummy
+      - QT_QPA_PLATFORM=xcb
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native
+    volumes:
+      # X11 forwarding
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # PulseAudio socket (audio hôte)
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
+      # Sons personnalisés persistants
+      - ./sounds:/app/sounds
+    devices:
+      - /dev/snd:/dev/snd
+    network_mode: host
+    restart: unless-stopped
+    command: python3 soundboard.py
+
+  # ── Mode headless pour CI / tests ──────────────────────────────────────────
+  soundboard-headless:
+    build:
+      context: .
+      target: runtime
+    image: lotr-soundboard:latest
+    container_name: lotr-soundboard-headless
+    environment:
+      - DISPLAY=:99
+      - SDL_AUDIODRIVER=dummy
+      - SDL_VIDEODRIVER=offscreen
+      - QT_QPA_PLATFORM=offscreen
+    profiles:
+      - ci
+    command: >
+      bash -c "
+        Xvfb :99 -screen 0 1024x768x24 -nolisten tcp &
+        sleep 0.5 &&
+        python3 -c \"
+          import ast, os
+          src = open('soundboard.py').read()
+          ast.parse(src)
+          print('[OK] soundboard.py syntax valid')
+          wavs = [f for r,_,fs in os.walk('sounds') for f in fs if f.endswith('.wav')]
+          print(f'[OK] {len(wavs)} audio files present')
+        \"
+      "
+
+  # ── Générateur de sons TTS ──────────────────────────────────────────────────
+  generate-sounds:
+    build:
+      context: .
+      target: audio-builder
+    image: lotr-soundboard-builder:latest
+    container_name: lotr-soundboard-gen
+    volumes:
+      - ./sounds:/build/sounds
+    profiles:
+      - tools
+    command: python3 generate_placeholders.py --force

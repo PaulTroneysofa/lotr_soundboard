@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Soundboard Le Seigneur des Anneaux — version française."""
 
+import math
 import os
 import sys
 import time
@@ -9,18 +10,27 @@ os.environ.setdefault("SDL_AUDIODRIVER", "pulse,alsa,dummy")
 os.environ.setdefault("SDL_VIDEODRIVER", "x11,wayland,offscreen")
 
 import pygame
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QKeySequence, QPalette
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGridLayout, QPushButton, QLabel, QSlider, QTabWidget,
-    QScrollArea, QSizePolicy, QFrame, QStatusBar, QProgressBar,
-    QLineEdit, QShortcut,
+    QApplication,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QShortcut,
+    QSizePolicy,
+    QSlider,
+    QStatusBar,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import (
-    Qt, QThread, pyqtSignal, QPropertyAnimation,
-    QEasingCurve, QPoint, QRect, pyqtProperty,
-)
-from PyQt5.QtGui import QFont, QColor, QPalette, QKeySequence
-
 
 SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 
@@ -160,44 +170,43 @@ class AudioThread(QThread):
 
 
 class PulseLabel(QLabel):
-    """QLabel that animates opacity to create a pulsing 'now playing' effect."""
+    """Pulsing 'now playing' label — fades between full and dim via QTimer."""
 
-    def __init__(self, text, parent=None):
+    _STEPS = 30
+    _INTERVAL_MS = 30  # ~33fps per half-cycle → 900ms total
+
+    def __init__(self, text: str, parent=None) -> None:
         super().__init__(text, parent)
-        self._opacity = 1.0
-        self._anim = QPropertyAnimation(self, b"opacity_prop")
-        self._anim.setDuration(900)
-        self._anim.setStartValue(1.0)
-        self._anim.setEndValue(0.3)
-        self._anim.setEasingCurve(QEasingCurve.InOutSine)
-        self._anim.setLoopCount(-1)  # infinite
-        self._anim.finished.connect(self._toggle_direction)
+        self._step = 0
+        self._direction = 1
+        self._timer = QTimer(self)
+        self._timer.setInterval(self._INTERVAL_MS)
+        self._timer.timeout.connect(self._tick)
 
-    def _toggle_direction(self):
-        pass  # handled by loop
+    def start_pulse(self) -> None:
+        self._step = 0
+        self._direction = 1
+        self._timer.start()
 
-    def start_pulse(self):
-        self._anim.stop()
-        self._anim.setDirection(QPropertyAnimation.Forward)
-        self._anim.start()
+    def stop_pulse(self) -> None:
+        self._timer.stop()
+        self._apply(1.0)
 
-    def stop_pulse(self):
-        self._anim.stop()
-        self._set_opacity(1.0)
+    def _tick(self) -> None:
+        self._step += self._direction
+        ratio = self._step / self._STEPS
+        self._apply(1.0 - 0.7 * abs(math.sin(math.pi * ratio)))
+        if self._step >= self._STEPS:
+            self._direction = -1
+        elif self._step <= 0:
+            self._direction = 1
 
-    @pyqtProperty(float)
-    def opacity_prop(self):
-        return self._opacity
-
-    @opacity_prop.setter
-    def opacity_prop(self, value):
-        self._set_opacity(value)
-
-    def _set_opacity(self, value):
-        self._opacity = value
+    def _apply(self, brightness: float) -> None:
+        r = int(200 * brightness)
+        g = int(160 * brightness)
+        b = int(64 * brightness)
         self.setStyleSheet(
-            self.styleSheet().split("opacity")[0]
-            + f"; color: rgba(200,160,64,{int(value*255)});"
+            f"color: rgb({r},{g},{b}); background: transparent; font-style: italic;"
         )
 
 
@@ -223,11 +232,9 @@ class SoundButton(QPushButton):
         if playing:
             bg = self.accent
             border = "#FFFFFF"
-            glow = f"border: 2px solid #FFFFFF; background-color: {self.accent};"
         else:
             bg = "#2A2A2A"
             border = self.accent
-            glow = ""
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg};

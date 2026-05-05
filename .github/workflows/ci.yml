@@ -1,0 +1,213 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Lint ────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev deps
+        run: pip install -r requirements-dev.txt
+
+      - name: ruff check
+        run: ruff check soundboard.py generate_placeholders.py
+
+      - name: ruff format check
+        run: ruff format --check soundboard.py generate_placeholders.py
+
+  # ── Type checking ───────────────────────────────────────────────────────────
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev deps
+        run: pip install -r requirements-dev.txt
+
+      - name: mypy
+        run: mypy soundboard.py generate_placeholders.py
+
+  # ── Tests ───────────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            espeak-ng \
+            libqt5widgets5 libqt5gui5 libqt5core5a libqt5network5 \
+            libasound2 libpulse0 \
+            libsdl2-2.0-0 libsdl2-mixer-2.0-0 \
+            xvfb fonts-dejavu-core
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Test - syntax check
+        run: |
+          python3 - <<'PYEOF'
+          import ast
+          for f in ["soundboard.py", "generate_placeholders.py"]:
+              ast.parse(open(f).read())
+              print(f"OK: {f} syntax valid")
+          PYEOF
+
+      - name: Test - generate audio files
+        run: |
+          python3 generate_placeholders.py
+          echo "Generated files:"
+          find sounds -name "*.wav" | sort
+
+      - name: Test - WAV file validity
+        run: |
+          python3 - <<'PYEOF'
+          import wave, os, sys
+          errors = []
+          total = 0
+          for char in os.listdir("sounds"):
+              d = os.path.join("sounds", char)
+              if not os.path.isdir(d):
+                  continue
+              for f in os.listdir(d):
+                  if not f.endswith(".wav"):
+                      continue
+                  path = os.path.join(d, f)
+                  try:
+                      with wave.open(path) as w:
+                          assert w.getnchannels() == 2, f"not stereo: {path}"
+                          assert w.getframerate() == 44100, f"not 44100Hz: {path}"
+                          assert w.getnframes() > 0, f"empty: {path}"
+                      total += 1
+                  except Exception as e:
+                      errors.append(str(e))
+          if errors:
+              for e in errors:
+                  print(f"ERROR: {e}", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: {total} valid WAV files (stereo 44100Hz)")
+          PYEOF
+
+      - name: Test - CHARACTERS data structure
+        run: |
+          python3 - <<'PYEOF'
+          import ast, os, sys
+          src = open("soundboard.py").read()
+          tree = ast.parse(src)
+          ns = {}
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign):
+                  for t in node.targets:
+                      if isinstance(t, ast.Name) and t.id == "CHARACTERS":
+                          code = compile(
+                              ast.Module(body=[node], type_ignores=[]), "<>", "exec"
+                          )
+                          exec(code, ns)
+          chars = ns.get("CHARACTERS", {})
+          assert chars, "CHARACTERS dict is empty"
+          required_keys = {"emoji", "color", "accent", "text_color", "sounds"}
+          for name, data in chars.items():
+              missing = required_keys - set(data.keys())
+              assert not missing, f"{name} missing keys: {missing}"
+              assert data["sounds"], f"{name} has no sounds"
+          total_sounds = sum(len(d["sounds"]) for d in chars.values())
+          print(f"OK: {len(chars)} characters, {total_sounds} sounds defined")
+          PYEOF
+
+      - name: Test - headless import
+        env:
+          DISPLAY: ":99"
+          QT_QPA_PLATFORM: offscreen
+          SDL_AUDIODRIVER: dummy
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 -nolisten tcp &
+          sleep 1
+          python3 - <<'PYEOF'
+          import os
+          os.environ["SDL_AUDIODRIVER"] = "dummy"
+          os.environ["SDL_VIDEODRIVER"] = "offscreen"
+          os.environ["QT_QPA_PLATFORM"] = "offscreen"
+          import pygame
+          pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+          print("OK: pygame.mixer initialized")
+          pygame.mixer.quit()
+          PYEOF
+
+  # ── Couverture audio ────────────────────────────────────────────────────────
+  audio-coverage:
+    name: Audio coverage
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install espeak-ng
+        run: sudo apt-get update -qq && sudo apt-get install -y espeak-ng
+
+      - name: Generate sounds
+        run: python3 generate_placeholders.py
+
+      - name: Check audio coverage
+        run: |
+          python3 - <<'PYEOF'
+          import ast, os, sys
+          src = open("soundboard.py").read()
+          tree = ast.parse(src)
+          ns = {}
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign):
+                  for t in node.targets:
+                      if isinstance(t, ast.Name) and t.id == "CHARACTERS":
+                          exec(compile(
+                              ast.Module(body=[node], type_ignores=[]), "<>", "exec"
+                          ), ns)
+          chars = ns["CHARACTERS"]
+          missing, present = [], []
+          for char, data in chars.items():
+              for key, label in data["sounds"]:
+                  path = os.path.join("sounds", char.lower(), f"{key}.wav")
+                  (present if os.path.exists(path) else missing).append(path)
+          total = len(present) + len(missing)
+          pct = len(present) / total * 100 if total else 0
+          print(f"Audio coverage: {len(present)}/{total} ({pct:.0f}%)")
+          if missing:
+              for p in missing:
+                  print(f"  MISSING: {p}")
+              sys.exit(1)
+          print("All audio files present.")
+          PYEOF

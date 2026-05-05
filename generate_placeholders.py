@@ -8,13 +8,13 @@ Priorité :
 Usage : python3 generate_placeholders.py [--force]
   --force  : régénère même si les fichiers existent déjà
 """
-import wave
-import struct
 import math
 import os
-import sys
 import shutil
+import struct
 import subprocess
+import sys
+import wave
 
 SR = 44100
 
@@ -120,7 +120,7 @@ def _save_stereo(path: str, samples: list[int]) -> None:
 
 def _convert_to_stereo_44100(mono_22050_path: str) -> None:
     with wave.open(mono_22050_path, "rb") as r:
-        ch, sw, sr = r.getnchannels(), r.getsampwidth(), r.getframerate()
+        sw, sr = r.getsampwidth(), r.getframerate()
         raw = r.readframes(r.getnframes())
 
     n = len(raw) // sw
